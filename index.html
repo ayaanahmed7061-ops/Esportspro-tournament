@@ -1,0 +1,343 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FIREZONE Tournament</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#090b12;color:white;font-family:Arial,sans-serif}
+header{background:#151824;padding:20px;text-align:center;border-bottom:2px solid #ff3434}
+header h1{margin:0;color:#ff4141;letter-spacing:2px}
+header p{color:#aaa;margin-bottom:0}
+.container{max-width:650px;margin:auto;padding:16px}
+.card{background:#171b29;border:1px solid #30364a;border-radius:13px;padding:18px;margin:15px 0}
+h2{color:#ff5151;margin-top:0}
+input,button{width:100%;padding:13px;margin:7px 0;border-radius:8px;border:1px solid #41485d;font-size:15px}
+input{background:#0e1220;color:white}
+button{background:#e8323c;color:white;border:0;font-weight:bold;cursor:pointer}
+button.secondary{background:#30374a}
+button:disabled{opacity:.5}
+small,.muted{color:#aab0c0}
+nav{display:flex;gap:7px;flex-wrap:wrap}
+nav button{flex:1;min-width:100px}
+.hidden{display:none!important}
+.match{background:#202638;padding:14px;border-radius:10px;margin:12px 0}
+.match h3{margin:0 0 8px;color:#ff6969}
+.tag{color:#72e6a1}
+#message{padding:10px;color:#ffb6b6}
+</style>
+</head>
+
+<body>
+<header>
+<h1>🔥 FIREZONE</h1>
+<p>FREE FIRE TOURNAMENT</p>
+</header>
+
+<div class="container">
+
+<div id="auth" class="card">
+<h2>Welcome to FIREZONE</h2>
+<div id="loginForm">
+<input id="email" type="email" placeholder="Email address">
+<input id="password" type="password" placeholder="Password">
+<button onclick="login()">LOGIN</button>
+<button class="secondary" onclick="signup()">CREATE ACCOUNT</button>
+</div>
+</div>
+
+<div id="app" class="hidden">
+<div class="card">
+<div id="welcome"></div>
+<button class="secondary" onclick="logout()">LOGOUT</button>
+</div>
+
+<nav>
+<button onclick="showPage('home')">Tournaments</button>
+<button onclick="showPage('profile')">My Profile</button>
+<button onclick="showPage('matches')">My Matches</button>
+<button id="adminTab" class="hidden" onclick="showPage('admin')">Admin</button>
+</nav>
+
+<div id="message"></div>
+
+<section id="home" class="page">
+<div class="card">
+<h2>Available Tournaments</h2>
+<div id="tournamentList">Loading tournaments...</div>
+</div>
+</section>
+
+<section id="profile" class="page hidden">
+<div class="card">
+<h2>My Profile</h2>
+<input id="playerName" placeholder="Player Name">
+<input id="gameUID" placeholder="Free Fire UID">
+<button onclick="saveProfile()">SAVE PROFILE</button>
+</div>
+</section>
+
+<section id="matches" class="page hidden">
+<div class="card">
+<h2>My Matches</h2>
+<div id="myMatches">Loading...</div>
+</div>
+</section>
+
+<section id="admin" class="page hidden">
+<div class="card">
+<h2>Admin Panel</h2>
+<h3>Add New Tournament</h3>
+<input id="tName" placeholder="Tournament name">
+<input id="tDate" type="datetime-local">
+<input id="tMap" placeholder="Map (Bermuda / Purgatory)">
+<input id="tSlots" type="number" placeholder="Maximum players">
+<input id="tPrize" placeholder="Prize information">
+<button onclick="addTournament()">ADD TOURNAMENT</button>
+</div>
+
+<div class="card">
+<h2>Manage Tournaments</h2>
+<div id="adminList">Loading...</div>
+</div>
+</section>
+</div>
+</div>
+
+<script>
+// FIREBASE CONFIGURATION
+const firebaseConfig = {
+ apiKey: "AIzaSyCkDgnzTQH4WuP8zihgp8cmDsHcVxnrZ5o",
+ authDomain: "esports-pro-2.firebaseapp.com",
+ databaseURL: "https://esports-pro-2-default-rtdb.firebaseio.com",
+ projectId: "esports-pro-2",
+ storageBucket: "esports-pro-2.firebasestorage.app",
+ messagingSenderId: "426743342321",
+ appId: "1:426743342321:web:d8f0e15823698ca83ff550",
+ measurementId: "G-GHTWPYZ1XC"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.database();
+
+let currentUser = null;
+let isAdmin = false;
+let tournaments = {};
+
+function msg(text){
+ document.getElementById("message").textContent=text;
+}
+
+function safe(value){
+ return String(value ?? "").replace(/[&<>"']/g, c => ({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+ }[c]));
+}
+
+function showPage(page){
+ document.querySelectorAll(".page").forEach(x=>x.classList.add("hidden"));
+ document.getElementById(page).classList.remove("hidden");
+ msg("");
+ if(page==="home") loadTournaments();
+ if(page==="matches") loadMyMatches();
+ if(page==="admin" && isAdmin) loadAdmin();
+}
+
+async function signup(){
+ const email=document.getElementById("email").value.trim();
+ const password=document.getElementById("password").value;
+ try{
+  await auth.createUserWithEmailAndPassword(email,password);
+  msg("Account created successfully!");
+ }catch(e){msg(e.message)}
+}
+
+async function login(){
+ const email=document.getElementById("email").value.trim();
+ const password=document.getElementById("password").value;
+ try{
+  await auth.signInWithEmailAndPassword(email,password);
+ }catch(e){msg(e.message)}
+}
+
+function logout(){auth.signOut()}
+
+auth.onAuthStateChanged(async user=>{
+ currentUser=user;
+ if(!user){
+  document.getElementById("auth").classList.remove("hidden");
+  document.getElementById("app").classList.add("hidden");
+  return;
+ }
+
+ document.getElementById("auth").classList.add("hidden");
+ document.getElementById("app").classList.remove("hidden");
+
+ const adminSnap=await db.ref("admins/"+user.uid).get();
+ isAdmin=adminSnap.val()===true;
+
+ document.getElementById("adminTab").classList.toggle("hidden",!isAdmin);
+ document.getElementById("welcome").textContent="Logged in: "+user.email;
+
+ const profile=await db.ref("users/"+user.uid).get();
+ if(profile.exists()){
+  document.getElementById("playerName").value=profile.val().name||"";
+  document.getElementById("gameUID").value=profile.val().gameUID||"";
+ }
+ loadTournaments();
+});
+
+async function saveProfile(){
+ const name=document.getElementById("playerName").value.trim();
+ const gameUID=document.getElementById("gameUID").value.trim();
+ if(!name||!gameUID)return msg("Enter your name and Free Fire UID.");
+ try{
+  await db.ref("users/"+currentUser.uid).update({name,gameUID});
+  msg("Profile saved!");
+ }catch(e){msg(e.message)}
+}
+
+async function loadTournaments(){
+ const box=document.getElementById("tournamentList");
+ box.textContent="Loading...";
+ try{
+  const snap=await db.ref("tournaments").get();
+  tournaments=snap.val()||{};
+  box.innerHTML="";
+  const entries=Object.entries(tournaments);
+  if(!entries.length){box.textContent="No tournaments available yet.";return}
+  entries.forEach(([id,t])=>{
+   const joined=!!(t.registrations && t.registrations[currentUser.uid]);
+   const item=document.createElement("div");
+   item.className="match";
+   item.innerHTML=`
+    <h3>${safe(t.name)}</h3>
+    <p>📅 ${safe(t.date||"Date not set")}</p>
+    <p>🗺️ ${safe(t.map||"Map not set")}</p>
+    <p>🏆 ${safe(t.prize||"Prize not announced")}</p>
+    <p>👥 Slots: ${safe(t.slots||"Not set")}</p>
+    <button ${joined?"disabled":""} onclick="joinTournament('${id}')">
+     ${joined?"ALREADY JOINED":"JOIN TOURNAMENT"}
+    </button>
+   `;
+   box.appendChild(item);
+  });
+ }catch(e){box.textContent=e.message}
+}
+
+async function joinTournament(id){
+ try{
+  const profile=await db.ref("users/"+currentUser.uid).get();
+  if(!profile.exists()||!profile.val().name||!profile.val().gameUID){
+   msg("Please save your player name and Free Fire UID first.");
+   showPage("profile");
+   return;
+  }
+  await db.ref("tournaments/"+id+"/registrations/"+currentUser.uid).set({
+   name:profile.val().name,
+   gameUID:profile.val().gameUID,
+   joinedAt:Date.now()
+  });
+  msg("Tournament joined successfully!");
+  loadTournaments();
+ }catch(e){msg(e.message)}
+}
+
+async function loadMyMatches(){
+ const box=document.getElementById("myMatches");
+ box.textContent="Loading...";
+ try{
+  const snap=await db.ref("tournaments").get();
+  const data=snap.val()||{};
+  box.innerHTML="";
+  let found=false;
+  Object.entries(data).forEach(([id,t])=>{
+   if(t.registrations && t.registrations[currentUser.uid]){
+    found=true;
+    const room=t.room||{};
+    const item=document.createElement("div");
+    item.className="match";
+    item.innerHTML=`
+     <h3>${safe(t.name)}</h3>
+     <p>Date: ${safe(t.date||"Not announced")}</p>
+     <p>Room ID: ${safe(room.id||"Not announced")}</p>
+     <p>Password: ${safe(room.password||"Not announced")}</p>
+    `;
+    box.appendChild(item);
+   }
+  });
+  if(!found)box.textContent="You have not joined any tournaments.";
+ }catch(e){box.textContent=e.message}
+}
+
+async function addTournament(){
+ if(!isAdmin)return msg("Admin access required.");
+ const name=document.getElementById("tName").value.trim();
+ const date=document.getElementById("tDate").value;
+ const map=document.getElementById("tMap").value.trim();
+ const slots=Number(document.getElementById("tSlots").value);
+ const prize=document.getElementById("tPrize").value.trim();
+ if(!name||!date||!slots)return msg("Enter tournament name, date and slots.");
+ try{
+  await db.ref("tournaments").push({
+   name,date,map,slots,prize,createdAt:Date.now()
+  });
+  msg("Tournament added!");
+  loadAdmin();
+  loadTournaments();
+ }catch(e){msg(e.message)}
+}
+
+async function loadAdmin(){
+ if(!isAdmin)return;
+ const box=document.getElementById("adminList");
+ box.textContent="Loading...";
+ const snap=await db.ref("tournaments").get();
+ const data=snap.val()||{};
+ box.innerHTML="";
+ Object.entries(data).forEach(([id,t])=>{
+  const item=document.createElement("div");
+  item.className="match";
+  item.innerHTML=`
+   <h3>${safe(t.name)}</h3>
+   <p>Registered players: ${Object.keys(t.registrations||{}).length}</p>
+   <input id="room_${id}" placeholder="Room ID" value="${safe(t.room?.id||"")}">
+   <input id="pass_${id}" placeholder="Room Password" value="${safe(t.room?.password||"")}">
+   <button onclick="updateRoom('${id}')">UPDATE ROOM</button>
+   <button class="secondary" onclick="deleteTournament('${id}')">DELETE TOURNAMENT</button>
+  `;
+  box.appendChild(item);
+ });
+}
+
+async function updateRoom(id){
+ if(!isAdmin)return;
+ try{
+  const roomId=document.getElementById("room_"+id).value.trim();
+  const password=document.getElementById("pass_"+id).value.trim();
+  await db.ref("tournaments/"+id+"/room").set({id:roomId,password});
+  msg("Room details updated!");
+ }catch(e){msg(e.message)}
+}
+
+async function deleteTournament(id){
+ if(!isAdmin)return;
+ if(!confirm("Delete this tournament?"))return;
+ try{
+  await db.ref("tournaments/"+id).remove();
+  msg("Tournament deleted.");
+  loadAdmin();
+  loadTournaments();
+ }catch(e){msg(e.message)}
+}
+</script>
+</body>
+</html>
